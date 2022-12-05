@@ -5,13 +5,13 @@ import java.io.File
 
 //val soRoot = "/mnt/d/RNApp68/android/app/build/react-ndk/exported/x86_64";
 // val soRoot = "C:\\rn_libs\\x86_64"
-var soRoot = "D:\\github\\react-native-macos\\ReactAndroid\\build\\intermediates\\stripped_native_libs\\release\\out\\lib\\x86_64"
+var soRootDefault = "D:\\github\\react-native-macos\\ReactAndroid\\build\\intermediates\\stripped_native_libs\\release\\out\\lib\\x86_64"
 // var soRoot = "/mnt/d/github/react-native-macos/ReactAndroid/build/intermediates/stripped_native_libs/release/out/lib/x86_64"
 val blackList = listOf("libc++_shared.so", "libandroid.so", "libc.so", "libdl.so", "libm.so", "liblog.so")
 
 val assumedList = listOf("libhermes.so")
 
-fun enumDeps(processedSos: LinkedHashMap<String, ArrayList<String>>, soName: String) {
+fun enumDeps(soRoot: String, processedSos: LinkedHashMap<String, ArrayList<String>>, soName: String) {
     if(soName in blackList || soName in processedSos.keys)
         return;
 
@@ -31,7 +31,7 @@ fun enumDeps(processedSos: LinkedHashMap<String, ArrayList<String>>, soName: Str
     val filteredSos = deps.asList().minus(blackList)
     processedSos[soName] = ArrayList<String>(filteredSos);
 
-    deps.forEach { enumDeps(processedSos, it)  }
+    deps.forEach { enumDeps(soRoot, processedSos, it)  }
 }
 
 fun printMap(processedSos: LinkedHashMap<String, java.util.ArrayList<String>>): ArrayList<String> {
@@ -59,6 +59,7 @@ fun printProcessedMap(processedSos: LinkedHashMap<String, ArrayList<String>>,
                       processedSosIndexed : LinkedHashMap<Int, ArrayList<Int>>,
                       processedSosIndexed2 : ArrayList<ArrayList<Int>>) {
     var loadedSos = ArrayList<String>();
+    var soListInLoadOrderTmp = ArrayList<String>();
 
     val allSos = processedSos.keys
     while(true) {
@@ -70,18 +71,17 @@ fun printProcessedMap(processedSos: LinkedHashMap<String, ArrayList<String>>,
             if (loadedSos.containsAll(depSos!!)) {
                 loadedSos.add(key)
 
-                // println(key + " ::: " + processedSos[key])
-
-                soListInLoadOrder.add(key);
-                var depsIndexed = processedSos[key]?.map { soListInLoadOrder.indexOf(it) } as ArrayList<Int>
-                processedSosIndexed[soListInLoadOrder.indexOf(key)] = depsIndexed
+                soListInLoadOrder.add(key.substring(3, key.lastIndexOf('.')));
+                soListInLoadOrderTmp.add(key);
+                var depsIndexed = processedSos[key]?.map { soListInLoadOrderTmp.indexOf(it) } as ArrayList<Int>
+                processedSosIndexed[soListInLoadOrderTmp.indexOf(key)] = depsIndexed
                 processedSosIndexed2.add(depsIndexed)
             }
         }
     }
 }
 
-fun createNuSpec(filePath: String, sosStr: String, depsStr: String, depLines: ArrayList<String>) {
+fun createNuSpec(soRoot: String, filePath: String, sosStr: String, depsStr: String, depLines: ArrayList<String>) {
     val prefix = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
             "<package xmlns=\"http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd\">\n" +
             "  <metadata>\n" +
@@ -172,17 +172,21 @@ fun createNuSpec(filePath: String, sosStr: String, depsStr: String, depLines: Ar
 }
 
 fun main(args: Array<String>) {
+    var soRoot = soRootDefault;
+    if(args.size >= 1) {
+        soRoot = args[0]
+    }
 
     val processedSos = LinkedHashMap<String, ArrayList<String>>();
     val soListInLoadOrder = ArrayList<String>();
     val processedSosIndexed = LinkedHashMap<Int, ArrayList<Int>>();
     val processedSosIndexed2 = ArrayList<ArrayList<Int>>();
 
-    enumDeps(processedSos, "libreactnativejni.so");
-    enumDeps(processedSos, "libfabricjni.so");
-    enumDeps(processedSos, "libv8executor.so");
-    enumDeps(processedSos, "libhermes-executor-debug.so");
-    enumDeps(processedSos, "libhermes-executor-release.so");
+    enumDeps(soRoot, processedSos, "libreactnativejni.so");
+    enumDeps(soRoot, processedSos, "libfabricjni.so");
+    enumDeps(soRoot, processedSos, "libv8executor.so");
+    enumDeps(soRoot, processedSos, "libhermes-executor-debug.so");
+    enumDeps(soRoot, processedSos, "libhermes-executor-release.so");
     val depLines = printMap(processedSos);
     printProcessedMap(processedSos, soListInLoadOrder, processedSosIndexed, processedSosIndexed2);
 
@@ -193,7 +197,7 @@ fun main(args: Array<String>) {
     println(depsStr)
 
     val nuSpecFilePath = "d:\\tmp\\ReactAndroid.nuspec"
-    createNuSpec(nuSpecFilePath, sosStr, depsStr, depLines)
+    createNuSpec(soRoot, nuSpecFilePath, sosStr, depsStr, depLines)
     return
 
     //val parser = ArgParser("example")
