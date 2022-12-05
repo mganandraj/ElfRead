@@ -1,20 +1,29 @@
-import com.facebook.soloader.*;
-import java.io.File
-import java.util.*
-import kotlin.collections.ArrayList
 
-//val soRoot = "/mnt/d/RNApp68/android/app/build/react-ndk/exported/x86_64/";
-val soRoot = "C:\\rn_libs\\x86_64\\"
+import com.facebook.soloader.ElfFileChannel
+import com.facebook.soloader.NativeDeps
+import java.io.File
+
+//val soRoot = "/mnt/d/RNApp68/android/app/build/react-ndk/exported/x86_64";
+// val soRoot = "C:\\rn_libs\\x86_64"
+var soRoot = "D:\\github\\react-native-macos\\ReactAndroid\\build\\intermediates\\stripped_native_libs\\release\\out\\lib\\x86_64"
+// var soRoot = "/mnt/d/github/react-native-macos/ReactAndroid/build/intermediates/stripped_native_libs/release/out/lib/x86_64"
 val blackList = listOf("libc++_shared.so", "libandroid.so", "libc.so", "libdl.so", "libm.so", "liblog.so")
+
+val assumedList = listOf("libhermes.so")
 
 fun enumDeps(processedSos: LinkedHashMap<String, ArrayList<String>>, soName: String) {
     if(soName in blackList || soName in processedSos.keys)
         return;
 
-    val soPath = soRoot + soName;
+    val soPath = "${soRoot}${File.separator}${soName}";
     val soFile = File(soPath);
-    if(!soFile.exists())
+
+    if(!soFile.exists()) {
+        if(assumedList.contains(soName)) {
+            processedSos[soName] = ArrayList<String>();
+        }
         return;
+    }
 
     val elf = ElfFileChannel(soFile);
     val deps = NativeDeps.getDependencies(soName, elf)
@@ -25,10 +34,13 @@ fun enumDeps(processedSos: LinkedHashMap<String, ArrayList<String>>, soName: Str
     deps.forEach { enumDeps(processedSos, it)  }
 }
 
-fun printMap(processedSos: LinkedHashMap<String, java.util.ArrayList<String>>) {
+fun printMap(processedSos: LinkedHashMap<String, java.util.ArrayList<String>>): ArrayList<String> {
+    var lines = ArrayList<String>()
     for(key in processedSos.keys) {
-        println(key + " :: " + processedSos[key])
+        lines.add(key + " :: " + processedSos[key])
     }
+
+    return lines;
 }
 
 
@@ -69,15 +81,109 @@ fun printProcessedMap(processedSos: LinkedHashMap<String, ArrayList<String>>,
     }
 }
 
+fun createNuSpec(filePath: String, sosStr: String, depsStr: String, depLines: ArrayList<String>) {
+    val prefix = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+            "<package xmlns=\"http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd\">\n" +
+            "  <metadata>\n" +
+            "    <id>OfficeReact.Android</id>\n" +
+            "    <version>\$buildNumber\$</version>\n" +
+            "    <description>Contains Android Implementation of React-Native</description>\n" +
+            "    <authors>Microsoft</authors>\n" +
+            "    <projectUrl>https://github.com/microsoft/react-native</projectUrl>\n" +
+            "    <repository type=\"git\" url=\"https://github.com/microsoft/react-native.git\"  commit=\"\$commitId\$\"/>\n" +
+            "    <requireLicenseAcceptance>false</requireLicenseAcceptance>\n" +
+            "  </metadata>\n" +
+            "\n" +
+            "  <files>\n\n"
+
+    val suffix = "  </files>\n" +
+            "</package>"
+
+    val misc = "\n" +
+            "    <!-- AAR and POM -->\n" +
+            "    <file src=\"..\\android\\com\\**\\*\" target=\"maven\\com\"/>\n" +
+            "\n" +
+            "    <!-- Headers, ideally we'd only exported the needed headers, not the complete list -->\n" +
+            "    <file src=\".\\build\\third-party-ndk\\double-conversion\\double-conversion\\*.h\" target=\"inc\\double-conversion\"/>\n" +
+            "    <file src=\".\\build\\third-party-ndk\\folly\\**\\*.*\" target=\"inc\" />\n" +
+            "    <file src=\".\\build\\third-party-ndk\\glog\\exported\\glog\\*.h\" target=\"inc\\glog\" />\n" +
+            "    <file src=\".\\build\\third-party-ndk\\jsc\\JavaScriptCore\\*.h\" target=\"inc\\jsc\"/>\n" +
+            "    <file src=\"..\\ReactCommon\\cxxreact\\**\\*.h\" target=\"inc\\cxxreact\"/>\n" +
+            "    <file src=\"..\\ReactCommon\\runtimeexecutor\\ReactCommon\\*.h\" target=\"inc\\ReactCommon\"/>\n" +
+            "    <file src=\"..\\ReactCommon\\callinvoker\\ReactCommon\\*.h\" target=\"inc\\ReactCommon\"/>\n" +
+            "    <file src=\"..\\ReactCommon\\jsi\\**\\*.h\" target=\"inc\\jsi\"/>\n" +
+            "    <file src=\"..\\ReactCommon\\yoga\\yoga\\**\\*.h\" target=\"inc\\Yoga\"/>\n" +
+            "    <file src=\"..\\android\\dependencies\\**\\*.*\" target=\"dependencies\"/>\n"
+
+
+    val nuspecFile = File(filePath)
+    if(!nuspecFile.exists())
+        nuspecFile.createNewFile();
+
+
+    nuspecFile.writeText(prefix)
+
+    nuspecFile.appendText("\n    <!-- Dependency details start -->\n")
+    depLines.forEach( {nuspecFile.appendText("    <!-- ${it} -->\n") })
+
+    nuspecFile.appendText("\n\n")
+    nuspecFile.appendText("    <!-- Condensed details to be used at runtime -->\n")
+    nuspecFile.appendText("    <!-- ${sosStr} -->\n")
+    nuspecFile.appendText("    <!-- ${depsStr} -->\n")
+
+    nuspecFile.appendText("    <!-- Dependency details end -->\n\n\n")
+
+    val strippedSoSource = "build\\intermediates\\stripped_native_libs\\release\\out\\lib"
+    val strippedSoTarget = "lib"
+
+    val unstrippedSoSource = "build\\intermediates\\merged_native_libs\\release\\out\\lib"
+    val unstrippedSoTarget = "lib"
+
+    val platforms = arrayOf<String>("x86", "x86_64", "arm", "arm64")
+    val platformsMap = mapOf("x86" to "droidx86", "x86_64" to "droidx64", "arm" to "droidarm", "arm64" to "droidarm64")
+
+    File(soRoot ).walk().forEach {
+        if(it.path.equals(soRoot))
+            return@forEach
+
+        val fileName =it.name
+
+        nuspecFile.appendText("    <!-- ${fileName} -->\n")
+        platforms.forEach {
+            val platform = it
+
+            val source = "${strippedSoSource}\\${platform}"
+            val target = "${strippedSoTarget}\\${platformsMap[platform]}"
+
+            val unStrippedSource = "${unstrippedSoSource}\\${platform}"
+            val unStrippedTarget = "${unstrippedSoTarget}\\${platformsMap[platform]}\\unstripped"
+
+            nuspecFile.appendText("    <file src=\"${source}\\${fileName}\" target=\"${target}\"/>\n")
+            nuspecFile.appendText("    <file src=\"${unStrippedSource}\\${fileName}\" target=\"${unStrippedTarget}\"/>\n")
+            nuspecFile.appendText("\n")
+        }
+
+        nuspecFile.appendText("\n")
+    }
+
+    nuspecFile.appendText(misc)
+    nuspecFile.appendText(suffix)
+
+}
+
 fun main(args: Array<String>) {
+
     val processedSos = LinkedHashMap<String, ArrayList<String>>();
     val soListInLoadOrder = ArrayList<String>();
     val processedSosIndexed = LinkedHashMap<Int, ArrayList<Int>>();
     val processedSosIndexed2 = ArrayList<ArrayList<Int>>();
 
-    // enumDeps(processedSos, "libreactnativejni.so");
+    enumDeps(processedSos, "libreactnativejni.so");
     enumDeps(processedSos, "libfabricjni.so");
-    // printMap(processedSos);
+    enumDeps(processedSos, "libv8executor.so");
+    enumDeps(processedSos, "libhermes-executor-debug.so");
+    enumDeps(processedSos, "libhermes-executor-release.so");
+    val depLines = printMap(processedSos);
     printProcessedMap(processedSos, soListInLoadOrder, processedSosIndexed, processedSosIndexed2);
 
     var sosStr = ("[" + soListInLoadOrder.map { "\"" + it + "\"" }.joinToString(",") + "]")
@@ -85,4 +191,15 @@ fun main(args: Array<String>) {
 
     println(sosStr)
     println(depsStr)
+
+    val nuSpecFilePath = "d:\\tmp\\ReactAndroid.nuspec"
+    createNuSpec(nuSpecFilePath, sosStr, depsStr, depLines)
+    return
+
+    //val parser = ArgParser("example")
+    //val soRoot by parser.option(ArgType.String, shortName = "soRoot", description = "SO Root directory").required()
+    // return;
+
+
+
 }
