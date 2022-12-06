@@ -2,16 +2,17 @@
 import com.facebook.soloader.ElfFileChannel
 import com.facebook.soloader.NativeDeps
 import java.io.File
+import kotlinx.cli.*
 
 //val soRoot = "/mnt/d/RNApp68/android/app/build/react-ndk/exported/x86_64";
 // val soRoot = "C:\\rn_libs\\x86_64"
-var soRootDefault = "D:\\github\\react-native-macos\\ReactAndroid\\build\\intermediates\\stripped_native_libs\\release\\out\\lib\\x86_64"
+//var soRootDefault = "D:\\github\\react-native-macos\\ReactAndroid\\build\\intermediates\\stripped_native_libs\\release\\out\\lib\\x86_64"
 // var soRoot = "/mnt/d/github/react-native-macos/ReactAndroid/build/intermediates/stripped_native_libs/release/out/lib/x86_64"
-val blackList = listOf("libc++_shared.so", "libandroid.so", "libc.so", "libdl.so", "libm.so", "liblog.so")
+val soRootDefault = "C:\\x86_64"
+// val blackList = listOf("libc++_shared.so", "libandroid.so", "libc.so", "libdl.so", "libm.so", "liblog.so")
+// val assumedList = listOf("libhermes.so")
 
-val assumedList = listOf("libhermes.so")
-
-fun enumDeps(soRoot: String, processedSos: LinkedHashMap<String, ArrayList<String>>, soName: String) {
+fun enumDeps(soRoot: String, processedSos: LinkedHashMap<String, ArrayList<String>>, blackList: List<String>, assumedList: List<String>, soName: String) {
     if(soName in blackList || soName in processedSos.keys)
         return;
 
@@ -31,7 +32,7 @@ fun enumDeps(soRoot: String, processedSos: LinkedHashMap<String, ArrayList<Strin
     val filteredSos = deps.asList().minus(blackList)
     processedSos[soName] = ArrayList<String>(filteredSos);
 
-    deps.forEach { enumDeps(soRoot, processedSos, it)  }
+    deps.forEach { enumDeps(soRoot, processedSos, blackList, assumedList, it)  }
 }
 
 fun printMap(processedSos: LinkedHashMap<String, java.util.ArrayList<String>>): ArrayList<String> {
@@ -172,21 +173,27 @@ fun createNuSpec(soRoot: String, filePath: String, sosStr: String, depsStr: Stri
 }
 
 fun main(args: Array<String>) {
-    var soRoot = soRootDefault;
-    if(args.size >= 1) {
-        soRoot = args[0]
-    }
+    val parser = kotlinx.cli.ArgParser("ElfRead")
+    val soRootArg by parser.option(ArgType.String, shortName = "sr", description = "Absolute path of the directory with SO files").default(soRootDefault)
+    val soFilesArg by parser.option(ArgType.String, shortName = "so", description = "Command separated list of root SO files").default("reactnativejni,fabricjni,v8executor,hermes-executor-debug,hermes-executor-release")
+    val ignoreListArg by parser.option(ArgType.String, shortName = "ig", description = "Command separated list of SO files to be ignored").default("c++_shared,android,c,dl,m,log")
+    val bypassListArg by parser.option(ArgType.String, shortName = "bp", description = "Command separated list of SO files to be included without checking for existence and without analyzing dependencies").default("hermes")
+    val nuspecPathArg by parser.option(ArgType.String, shortName = "ns", description = "Path to the nuspec file").default("c:\\tmp\\ReactAndroid.nuspec")
+    parser.parse(args)
+
+    var soRoot = soRootArg
+    var rootSoFiles = soFilesArg.split(",").map { "lib${it}.so" }
+    var ignoreSoFiles = ignoreListArg.split(",").map { "lib${it}.so" }
+    var bypassSoFiles = bypassListArg.split(",").map { "lib${it}.so" }
+    var nuspecFilePath = nuspecPathArg
 
     val processedSos = LinkedHashMap<String, ArrayList<String>>();
     val soListInLoadOrder = ArrayList<String>();
     val processedSosIndexed = LinkedHashMap<Int, ArrayList<Int>>();
     val processedSosIndexed2 = ArrayList<ArrayList<Int>>();
 
-    enumDeps(soRoot, processedSos, "libreactnativejni.so");
-    enumDeps(soRoot, processedSos, "libfabricjni.so");
-    enumDeps(soRoot, processedSos, "libv8executor.so");
-    enumDeps(soRoot, processedSos, "libhermes-executor-debug.so");
-    enumDeps(soRoot, processedSos, "libhermes-executor-release.so");
+    rootSoFiles.forEach { enumDeps(soRoot, processedSos, ignoreSoFiles, bypassSoFiles, it) }
+
     val depLines = printMap(processedSos);
     printProcessedMap(processedSos, soListInLoadOrder, processedSosIndexed, processedSosIndexed2);
 
@@ -196,8 +203,7 @@ fun main(args: Array<String>) {
     println(sosStr)
     println(depsStr)
 
-    val nuSpecFilePath = "d:\\tmp\\ReactAndroid.nuspec"
-    createNuSpec(soRoot, nuSpecFilePath, sosStr, depsStr, depLines)
+    createNuSpec(soRoot, nuspecFilePath, sosStr, depsStr, depLines)
     return
 
     //val parser = ArgParser("example")
