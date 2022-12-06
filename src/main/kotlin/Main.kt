@@ -3,6 +3,11 @@ import com.facebook.soloader.ElfFileChannel
 import com.facebook.soloader.NativeDeps
 import java.io.File
 import kotlinx.cli.*
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.collections.ArrayList
+import kotlin.collections.LinkedHashMap
+import kotlin.io.path.Path
 
 //val soRoot = "/mnt/d/RNApp68/android/app/build/react-ndk/exported/x86_64";
 // val soRoot = "C:\\rn_libs\\x86_64"
@@ -178,14 +183,16 @@ fun main(args: Array<String>) {
     val soFilesArg by parser.option(ArgType.String, shortName = "so", description = "Command separated list of root SO files").default("reactnativejni,fabricjni,v8executor,hermes-executor-debug,hermes-executor-release")
     val ignoreListArg by parser.option(ArgType.String, shortName = "ig", description = "Command separated list of SO files to be ignored").default("c++_shared,android,c,dl,m,log")
     val bypassListArg by parser.option(ArgType.String, shortName = "bp", description = "Command separated list of SO files to be included without checking for existence and without analyzing dependencies").default("hermes")
-    val nuspecPathArg by parser.option(ArgType.String, shortName = "ns", description = "Path to the nuspec file").default("c:\\tmp\\ReactAndroid.nuspec")
+    val nuspecPathArg by parser.option(ArgType.String, shortName = "ns", description = "Path to the nuspec file").default("c:\\tmp")
     parser.parse(args)
 
     var soRoot = soRootArg
     var rootSoFiles = soFilesArg.split(",").map { "lib${it}.so" }
     var ignoreSoFiles = ignoreListArg.split(",").map { "lib${it}.so" }
     var bypassSoFiles = bypassListArg.split(",").map { "lib${it}.so" }
-    var nuspecFilePath = nuspecPathArg
+
+    val timeStamp: String = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
+    var nuspecFilePath = Path(nuspecPathArg, "ReactAndroid_${timeStamp}.nuspec")
 
     val processedSos = LinkedHashMap<String, ArrayList<String>>();
     val soListInLoadOrder = ArrayList<String>();
@@ -202,14 +209,8 @@ fun main(args: Array<String>) {
 
     println(sosStr)
     println(depsStr)
+    println(nuspecFilePath)
 
-    createNuSpec(soRoot, nuspecFilePath, sosStr, depsStr, depLines)
+    createNuSpec(soRoot, nuspecFilePath.toString(), sosStr, depsStr, depLines)
     return
-
-    //val parser = ArgParser("example")
-    //val soRoot by parser.option(ArgType.String, shortName = "soRoot", description = "SO Root directory").required()
-    // return;
-
-
-
 }
